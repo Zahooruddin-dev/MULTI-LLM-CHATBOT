@@ -17,6 +17,7 @@ dist-ssr
 # Environment variables
 .env
 *.local
+main/env
 
 # Editor directories and files
 .vscode/*
