@@ -114,8 +114,8 @@ const Chat = () => {
   };
 
   const toggleSidebar = () => {
-    setShowSidebar(!showSidebar);
-  };
+/*     setShowSidebar(!showSidebar);
+ */  };
 
   return (
     <div className="chat-container">
