@@ -2,8 +2,25 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getFirestore, collection, query, orderBy, addDoc, onSnapshot } from 'firebase/firestore';
-const API_URL = import.meta.env.VITE_DEEPSEEK_API_URL;
-const API_KEY = import.meta.env.VITE_DEEPSEEK_API_KEY;
+
+const API_URLS = {
+  deepseek: import.meta.env.VITE_DEEPSEEK_API_URL,
+  gemini: import.meta.env.VITE_GEMINI_API_URL,
+  rogue: import.meta.env.VITE_ROGUE_API_URL
+
+};
+
+const API_KEYS = {
+  deepseek: import.meta.env.VITE_DEEPSEEK_API_KEY,
+  gemini: import.meta.env.VITE_GEMINI_API_KEY,
+  rogue: import.meta.env.VITE_ROGUE_API_KEY
+};
+
+const models = {
+  deepseek: 'deepseek/deepseek-r1:free',
+  rogue: 'sophosympatheia/rogue-rose-103b-v0.2:free',
+  gemini: 'google/gemini-exp-1114:free'
+};
 
 const Chat = () => {
   const { user, logout } = useAuth();
@@ -12,6 +29,7 @@ const Chat = () => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [selectedApi, setSelectedApi] = useState('deepseek');
   const messagesEndRef = useRef(null);
   const db = getFirestore();
 
@@ -48,57 +66,56 @@ const Chat = () => {
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
-  
     setLoading(true);
+
     try {
-      const response = await fetch(API_URL, {
+      const apiUrl = API_URLS[selectedApi];
+      const apiKey = API_KEYS[selectedApi];
+      const model = models[selectedApi];
+
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${API_KEY}`
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: "deepseek/deepseek-r1:free",
+          model,
           messages: [{ role: "user", content: input }]
         })
       });
-  
+
+      // Handle API response
       const text = await response.text();
       console.log("Raw Response Text:", text);
-      
+
       const data = text ? JSON.parse(text) : null;
-  
+
       if (!response.ok) {
         console.error("API Error:", data?.error?.message || "Unknown error");
-        
         if (response.status === 429) {
-          // Rate limit exceeded, wait before retrying
           const retryAfter = data?.error?.metadata?.raw?.match(/(\d+)/)?.[0] || 5;
           console.log(`Rate limit exceeded. Retrying in ${retryAfter} seconds...`);
           setTimeout(() => handleSend(), retryAfter * 1000);
         }
-  
-        throw new Error(data?.error?.message || "Invalid response from DeepSeek API.");
+        throw new Error(data?.error?.message || "Invalid response from API.");
       }
-  
+
       if (!data?.choices?.length) {
         throw new Error("Unexpected API response format.");
       }
-  
+
       const botMessage = data.choices[0].message.content;
-  
       await addDoc(collection(db, `chats/${user.uid}/messages`), {
         text: input,
         sender: 'user',
         timestamp: new Date().toISOString()
       });
-  
       await addDoc(collection(db, `chats/${user.uid}/messages`), {
         text: formatApiResponse(botMessage),
         sender: 'bot',
         timestamp: new Date().toISOString()
       });
-  
       setInput('');
     } catch (error) {
       console.error("Error sending message:", error);
@@ -114,8 +131,8 @@ const Chat = () => {
   };
 
   const toggleSidebar = () => {
-/*     setShowSidebar(!showSidebar);
- */  };
+   /* setShowSidebar(!showSidebar);
+  */};
 
   return (
     <div className="chat-container">
@@ -132,6 +149,15 @@ const Chat = () => {
           <h2>Chat with AI</h2>
           <button onClick={handleLogout}>Logout</button>
         </header>
+
+        <div className="api-selector">
+          <label>Select API:</label>
+          <select value={selectedApi} onChange={(e) => setSelectedApi(e.target.value)}>
+            {Object.keys(API_URLS).map(api => (
+              <option key={api} value={api}>{api}</option>
+            ))}
+          </select>
+        </div>
 
         <div className="messages-container">
           {messages.map((message) => (
