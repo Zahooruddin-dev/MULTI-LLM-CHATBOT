@@ -19,7 +19,6 @@
   padding: 0;
   box-sizing: border-box;
   transition: all 0.3s ease;
-  flex-direction: column;
 }
 
 body {
@@ -176,6 +175,7 @@ body {
   border-radius: 16px;
   position: relative;
   animation: messageSlide 0.3s ease;
+  word-wrap: break-word; /* Ensure messages wrap properly */
 }
 
 @keyframes messageSlide {

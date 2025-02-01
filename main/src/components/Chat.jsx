@@ -1,11 +1,10 @@
-
-// src/components/Chat.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getFirestore, collection, query, orderBy, addDoc, onSnapshot } from 'firebase/firestore';
 const API_URL = import.meta.env.VITE_DEEPSEEK_API_URL;
 const API_KEY = import.meta.env.VITE_DEEPSEEK_API_KEY;
+
 const Chat = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -46,6 +45,7 @@ const Chat = () => {
       console.error('Failed to logout:', error);
     }
   };
+
   const handleSend = async () => {
     if (!input.trim() || loading) return;
   
@@ -94,7 +94,7 @@ const Chat = () => {
       });
   
       await addDoc(collection(db, `chats/${user.uid}/messages`), {
-        text: botMessage,
+        text: formatApiResponse(botMessage),
         sender: 'bot',
         timestamp: new Date().toISOString()
       });
@@ -106,8 +106,13 @@ const Chat = () => {
       setLoading(false);
     }
   };
-  
-  
+
+  const formatApiResponse = (response) => {
+    // Format the data from API response
+    const formattedData = response.replace(/,/g, ', ');
+    return formattedData;
+  };
+
   const toggleSidebar = () => {
     setShowSidebar(!showSidebar);
   };
