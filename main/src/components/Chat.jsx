@@ -4,7 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getFirestore, collection, query, orderBy, addDoc, onSnapshot } from 'firebase/firestore';
-
+const API_URL = import.meta.env.VITE_DEEPSEEK_API_URL;
+const API_KEY = import.meta.env.VITE_DEEPSEEK_API_KEY;
 const Chat = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -45,45 +46,68 @@ const Chat = () => {
       console.error('Failed to logout:', error);
     }
   };
-
   const handleSend = async () => {
     if (!input.trim() || loading) return;
-
+  
     setLoading(true);
     try {
-      // Send message to Deepseek API (replace with actual API call)
-      const response = await fetch('YOUR_DEEPSEEK_API_ENDPOINT', {
+      const response = await fetch(API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer YOUR_API_KEY'
+          'Authorization': `Bearer ${API_KEY}`
         },
-        body: JSON.stringify({ message: input })
+        body: JSON.stringify({
+          model: "deepseek/deepseek-r1:free",
+          messages: [{ role: "user", content: input }]
+        })
       });
-
-      const data = await response.json();
-
-      // Store messages in Firestore
+  
+      const text = await response.text();
+      console.log("Raw Response Text:", text);
+      
+      const data = text ? JSON.parse(text) : null;
+  
+      if (!response.ok) {
+        console.error("API Error:", data?.error?.message || "Unknown error");
+        
+        if (response.status === 429) {
+          // Rate limit exceeded, wait before retrying
+          const retryAfter = data?.error?.metadata?.raw?.match(/(\d+)/)?.[0] || 5;
+          console.log(`Rate limit exceeded. Retrying in ${retryAfter} seconds...`);
+          setTimeout(() => handleSend(), retryAfter * 1000);
+        }
+  
+        throw new Error(data?.error?.message || "Invalid response from DeepSeek API.");
+      }
+  
+      if (!data?.choices?.length) {
+        throw new Error("Unexpected API response format.");
+      }
+  
+      const botMessage = data.choices[0].message.content;
+  
       await addDoc(collection(db, `chats/${user.uid}/messages`), {
         text: input,
         sender: 'user',
         timestamp: new Date().toISOString()
       });
-
+  
       await addDoc(collection(db, `chats/${user.uid}/messages`), {
-        text: data.response,
+        text: botMessage,
         sender: 'bot',
         timestamp: new Date().toISOString()
       });
-
+  
       setInput('');
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error("Error sending message:", error);
     } finally {
       setLoading(false);
     }
   };
-
+  
+  
   const toggleSidebar = () => {
     setShowSidebar(!showSidebar);
   };
