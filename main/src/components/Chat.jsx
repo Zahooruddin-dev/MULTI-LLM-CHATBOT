@@ -6,6 +6,7 @@ import { getFirestore, collection, query, orderBy, addDoc, onSnapshot } from 'fi
 const API_URLS = {
   deepseek: import.meta.env.VITE_DEEPSEEK_API_URL,
   gemini: import.meta.env.VITE_GEMINI_API_URL,
+  meta: import.meta.env.VITE_META_API_URL,
   rogue: import.meta.env.VITE_ROGUE_API_URL
 
 };
@@ -13,12 +14,14 @@ const API_URLS = {
 const API_KEYS = {
   deepseek: import.meta.env.VITE_DEEPSEEK_API_KEY,
   gemini: import.meta.env.VITE_GEMINI_API_KEY,
+  meta: import.meta.env.VITE_META_API_KEY,
   rogue: import.meta.env.VITE_ROGUE_API_KEY
 };
 
 const models = {
   deepseek: 'deepseek/deepseek-r1:free',
   rogue: 'sophosympatheia/rogue-rose-103b-v0.2:free',
+  meta: 'meta-llama/llama-3.2-90b-vision-instruct:free',
   gemini: 'google/gemini-exp-1114:free'
 };
 
