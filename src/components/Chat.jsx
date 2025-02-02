@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { getFirestore, collection, query, orderBy, addDoc, onSnapshot, where } from 'firebase/firestore';
 import { Loader2, MessageSquare, ChevronDown, Brain, Bot } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
@@ -20,10 +19,10 @@ const API_KEYS = {
 };
 
 const models = {
-  deepseek: 'DeepSeek Chat',
-  rogue: 'Rogue Rose',
-  meta: 'Llama 3.2',
-  gemini: 'Gemini Pro'
+  deepseek: 'deepseek/deepseek-r1:free',
+  rogue: 'sophosympatheia/rogue-rose-103b-v0.2:free',
+  meta: 'meta-llama/llama-3.2-90b-vision-instruct:free',
+  gemini: 'google/gemini-exp-1114:free'
 };
 
 const Chat = () => {
@@ -39,67 +38,57 @@ const Chat = () => {
   const [responseTime, setResponseTime] = useState(0);
   const [selectedChat, setSelectedChat] = useState(null);
   const messagesEndRef = useRef(null);
-  const db = getFirestore();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Load messages from localStorage on component mount
   useEffect(() => {
-    let q;
-    if (selectedChat) {
-      q = query(
-        collection(db, `chats/${user.uid}/messages`),
-        where('chatId', '==', selectedChat),
-        orderBy('timestamp', 'asc')
-      );
-    } else {
-      q = query(
-        collection(db, `chats/${user.uid}/messages`),
-        orderBy('timestamp', 'desc')
-      );
-    }
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newMessages = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+    const savedMessages = localStorage.getItem(`chat_messages_${user.uid}`);
+    if (savedMessages) {
+      const parsedMessages = JSON.parse(savedMessages);
+      setMessages(selectedChat ? parsedMessages.filter(msg => msg.chatId === selectedChat) : []);
       
-      // Group messages by chat session for history
-      const conversations = newMessages.reduce((acc, msg) => {
-        const date = new Date(msg.timestamp).toLocaleDateString();
-        if (!acc[date]) acc[date] = { messages: [], preview: '' };
-        acc[date].messages.push(msg);
-        if (msg.sender === 'user') acc[date].preview = msg.text;
+      // Group messages by chat session
+      const conversations = parsedMessages.reduce((acc, msg) => {
+        const chatId = msg.chatId;
+        if (!acc[chatId]) {
+          acc[chatId] = {
+            messages: [],
+            preview: '',
+            timestamp: msg.timestamp
+          };
+        }
+        acc[chatId].messages.push(msg);
+        if (msg.sender === 'user') {
+          acc[chatId].preview = msg.text;
+        }
         return acc;
       }, {});
       
-      setChatHistory(Object.entries(conversations));
-      setMessages(selectedChat ? newMessages : []);
-      scrollToBottom();
-    });
+      // Sort conversations by timestamp
+      const sortedHistory = Object.entries(conversations)
+        .sort(([,a], [,b]) => new Date(b.timestamp) - new Date(a.timestamp));
+      
+      setChatHistory(sortedHistory);
+    }
+  }, [user.uid, selectedChat]);
 
-    return () => unsubscribe();
-  }, [user.uid, db, selectedChat]);
-
-  const handleChatSelect = (date, messages) => {
-    setSelectedChat(date);
+  const handleChatSelect = (chatId, messages) => {
+    setSelectedChat(chatId);
     setMessages(messages);
   };
-  
-  const handleLogout = async ()=>{
-    logout(async function logout() {
-        try {
-          await signOut(auth);
-          setUser(null);
-          setError('');
-        } catch (err) {
-          setError('Failed to logout.');
-          throw err;
-        }
-      })
-  }
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim() || loading) return;
     setLoading(true);
@@ -112,14 +101,25 @@ const Chat = () => {
       const apiKey = API_KEYS[selectedApi];
       const model = models[selectedApi];
 
-      // Add user message immediately with thinking indicator
-      await addDoc(collection(db, `chats/${user.uid}/messages`), {
+      // Add user message
+      const userMessage = {
+        id: Date.now().toString(),
         text: input,
         sender: 'user',
         timestamp: new Date().toISOString(),
         model: selectedApi,
         chatId
-      });
+      };
+
+      // Get existing messages from localStorage
+      const existingMessages = JSON.parse(localStorage.getItem(`chat_messages_${user.uid}`) || '[]');
+      const updatedMessages = [...existingMessages, userMessage];
+      
+      // Save to localStorage
+      localStorage.setItem(`chat_messages_${user.uid}`, JSON.stringify(updatedMessages));
+      
+      // Update state
+      setMessages(prev => [...prev, userMessage]);
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -142,16 +142,21 @@ const Chat = () => {
         throw new Error(data?.error?.message || "Invalid response from API.");
       }
 
-      const botMessage = data.choices[0].message.content;
-      
-      await addDoc(collection(db, `chats/${user.uid}/messages`), {
-        text: botMessage,
+      const botMessage = {
+        id: (Date.now() + 1).toString(),
+        text: data.choices[0].message.content,
         sender: 'bot',
         timestamp: new Date().toISOString(),
         model: selectedApi,
         chatId
-      });
+      };
+
+      // Save bot message to localStorage
+      const finalMessages = [...updatedMessages, botMessage];
+      localStorage.setItem(`chat_messages_${user.uid}`, JSON.stringify(finalMessages));
       
+      // Update state
+      setMessages(prev => [...prev, botMessage]);
       setInput('');
       setSelectedChat(chatId);
     } catch (error) {
@@ -164,6 +169,7 @@ const Chat = () => {
 
   return (
     <div className="chat-container">
+      {/* Rest of your JSX remains exactly the same */}
       <aside className={`sidebar ${showSidebar ? 'active' : ''}`}>
         <div className="chat-history-container">
           <h3 className="history-title">
