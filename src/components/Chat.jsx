@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getFirestore, collection, query, orderBy, addDoc, onSnapshot } from 'firebase/firestore';
+import { Loader2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 const API_URLS = {
   deepseek: import.meta.env.VITE_DEEPSEEK_API_URL,
   gemini: import.meta.env.VITE_GEMINI_API_URL,
   meta: import.meta.env.VITE_META_API_URL,
   rogue: import.meta.env.VITE_ROGUE_API_URL
-
 };
 
 const API_KEYS = {
@@ -29,10 +30,12 @@ const Chat = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
+  const [chatHistory, setChatHistory] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [selectedApi, setSelectedApi] = useState('deepseek');
+  const [responseTime, setResponseTime] = useState(0);
   const messagesEndRef = useRef(null);
   const db = getFirestore();
 
@@ -52,6 +55,16 @@ const Chat = () => {
         ...doc.data()
       }));
       setMessages(newMessages);
+      
+      // Group messages by conversation for chat history
+      const conversations = newMessages.reduce((acc, msg) => {
+        const date = new Date(msg.timestamp).toLocaleDateString();
+        if (!acc[date]) acc[date] = [];
+        acc[date].push(msg);
+        return acc;
+      }, {});
+      
+      setChatHistory(Object.entries(conversations));
       scrollToBottom();
     });
 
@@ -70,6 +83,7 @@ const Chat = () => {
   const handleSend = async () => {
     if (!input.trim() || loading) return;
     setLoading(true);
+    const startTime = Date.now();
 
     try {
       const apiUrl = API_URLS[selectedApi];
@@ -88,37 +102,31 @@ const Chat = () => {
         })
       });
 
-      // Handle API response
       const text = await response.text();
-      console.log("Raw Response Text:", text);
-
       const data = text ? JSON.parse(text) : null;
+      const endTime = Date.now();
+      setResponseTime((endTime - startTime) / 1000);
 
       if (!response.ok) {
-        console.error("API Error:", data?.error?.message || "Unknown error");
-        if (response.status === 429) {
-          const retryAfter = data?.error?.metadata?.raw?.match(/(\d+)/)?.[0] || 5;
-          console.log(`Rate limit exceeded. Retrying in ${retryAfter} seconds...`);
-          setTimeout(() => handleSend(), retryAfter * 1000);
-        }
         throw new Error(data?.error?.message || "Invalid response from API.");
       }
 
-      if (!data?.choices?.length) {
-        throw new Error("Unexpected API response format.");
-      }
-
       const botMessage = data.choices[0].message.content;
+      
       await addDoc(collection(db, `chats/${user.uid}/messages`), {
         text: input,
         sender: 'user',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        model: selectedApi
       });
+      
       await addDoc(collection(db, `chats/${user.uid}/messages`), {
-        text: formatApiResponse(botMessage),
+        text: botMessage,
         sender: 'bot',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        model: selectedApi
       });
+      
       setInput('');
     } catch (error) {
       console.error("Error sending message:", error);
@@ -127,40 +135,51 @@ const Chat = () => {
     }
   };
 
-  const formatApiResponse = (response) => {
-    // Format the data from API response
-    const formattedData = response.replace(/,/g, ', ');
-    return formattedData;
-  };
-
-  const toggleSidebar = () => {
-   /* setShowSidebar(!showSidebar);
-  */};
-
   return (
     <div className="chat-container">
       <aside className={`sidebar ${showSidebar ? 'active' : ''}`}>
-        <div className="chat-history">
-          <h3>Chat History</h3>
-          {/* Add your chat history list items here */}
+        <div className="chat-history-container">
+          <h3 className="history-title">Chat History</h3>
+          {chatHistory.map(([date, msgs]) => (
+            <div key={date} className="history-date-group">
+              <h4 className="history-date">{date}</h4>
+              <div className="history-messages">
+                {msgs.slice(0, 2).map((msg, idx) => (
+                  <div key={idx} className="history-message-preview">
+                    {msg.text.substring(0, 50)}...
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </aside>
 
       <main className="main-chat">
         <header className="chat-header">
-          <button onClick={toggleSidebar}>☰</button>
-          <h2>Chat with AI</h2>
-          <button onClick={handleLogout}>Logout</button>
+          <button onClick={() => setShowSidebar(!showSidebar)} className="menu-button">
+            ☰
+          </button>
+          <div className="header-center">
+            <h2>PETRONAS AI Assistant</h2>
+            <div className="model-selector">
+              <select 
+                value={selectedApi} 
+                onChange={(e) => setSelectedApi(e.target.value)}
+                className="model-select"
+              >
+                {Object.entries(models).map(([key, value]) => (
+                  <option key={key} value={key}>
+                    {value.split('/')[1]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <button onClick={handleLogout} className="logout-button">
+            Logout
+          </button>
         </header>
-
-        <div className="api-selector">
-          <label>Select API:</label>
-          <select value={selectedApi} onChange={(e) => setSelectedApi(e.target.value)}>
-            {Object.keys(API_URLS).map(api => (
-              <option key={api} value={api}>{api}</option>
-            ))}
-          </select>
-        </div>
 
         <div className="messages-container">
           {messages.map((message) => (
@@ -168,9 +187,29 @@ const Chat = () => {
               key={message.id}
               className={`message ${message.sender === 'user' ? 'user' : 'bot'}`}
             >
-              {message.text}
+              <div className="message-header">
+                <span className="sender-name">
+                  {message.sender === 'user' ? 'You' : message.model}
+                </span>
+                <span className="message-time">
+                  {new Date(message.timestamp).toLocaleTimeString()}
+                </span>
+              </div>
+              <div className="message-content">
+                {message.sender === 'bot' ? (
+                  <ReactMarkdown>{message.text}</ReactMarkdown>
+                ) : (
+                  message.text
+                )}
+              </div>
             </div>
           ))}
+          {loading && (
+            <div className="loading-indicator">
+              <Loader2 className="animate-spin" />
+              <span>Generating response... ({responseTime.toFixed(1)}s)</span>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
 
@@ -192,7 +231,11 @@ const Chat = () => {
             disabled={loading || !input.trim()}
             className="send-button"
           >
-            {loading ? 'Sending...' : 'Send'}
+            {loading ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              'Send'
+            )}
           </button>
         </div>
       </main>
