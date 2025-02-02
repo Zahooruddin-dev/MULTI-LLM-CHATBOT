@@ -200,7 +200,7 @@ const Chat = () => {
             ☰
           </button>
           <div className="header-center">
-            <h2>PETRONAS AI Assistant</h2>
+            <h2>MULTI LLM AI Assistant</h2>
             <div className="model-selector">
               <Bot className="model-icon" />
               <select 
