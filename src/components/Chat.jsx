@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { getFirestore, collection, query, orderBy, addDoc, onSnapshot } from 'firebase/firestore';
-import { Loader2 } from 'lucide-react';
+import { getFirestore, collection, query, orderBy, addDoc, onSnapshot, where } from 'firebase/firestore';
+import { Loader2, MessageSquare, ChevronDown, Brain, Bot } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 const API_URLS = {
@@ -20,10 +20,10 @@ const API_KEYS = {
 };
 
 const models = {
-  deepseek: 'deepseek/deepseek-r1:free',
-  rogue: 'sophosympatheia/rogue-rose-103b-v0.2:free',
-  meta: 'meta-llama/llama-3.2-90b-vision-instruct:free',
-  gemini: 'google/gemini-exp-1114:free'
+  deepseek: 'DeepSeek Chat',
+  rogue: 'Rogue Rose',
+  meta: 'Llama 3.2',
+  gemini: 'Gemini Pro'
 };
 
 const Chat = () => {
@@ -33,9 +33,11 @@ const Chat = () => {
   const [chatHistory, setChatHistory] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [thinking, setThinking] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [selectedApi, setSelectedApi] = useState('deepseek');
   const [responseTime, setResponseTime] = useState(0);
+  const [selectedChat, setSelectedChat] = useState(null);
   const messagesEndRef = useRef(null);
   const db = getFirestore();
 
@@ -44,51 +46,71 @@ const Chat = () => {
   };
 
   useEffect(() => {
-    const q = query(
-      collection(db, `chats/${user.uid}/messages`),
-      orderBy('timestamp', 'asc')
-    );
+    let q;
+    if (selectedChat) {
+      q = query(
+        collection(db, `chats/${user.uid}/messages`),
+        where('chatId', '==', selectedChat),
+        orderBy('timestamp', 'asc')
+      );
+    } else {
+      q = query(
+        collection(db, `chats/${user.uid}/messages`),
+        orderBy('timestamp', 'desc')
+      );
+    }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const newMessages = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      setMessages(newMessages);
       
-      // Group messages by conversation for chat history
+      // Group messages by chat session for history
       const conversations = newMessages.reduce((acc, msg) => {
         const date = new Date(msg.timestamp).toLocaleDateString();
-        if (!acc[date]) acc[date] = [];
-        acc[date].push(msg);
+        if (!acc[date]) acc[date] = { messages: [], preview: '' };
+        acc[date].messages.push(msg);
+        if (msg.sender === 'user') acc[date].preview = msg.text;
         return acc;
       }, {});
       
       setChatHistory(Object.entries(conversations));
+      setMessages(selectedChat ? newMessages : []);
       scrollToBottom();
     });
 
     return () => unsubscribe();
-  }, [user.uid, db]);
+  }, [user.uid, db, selectedChat]);
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      navigate('/login');
-    } catch (error) {
-      console.error('Failed to logout:', error);
-    }
+  const handleChatSelect = (date, messages) => {
+    setSelectedChat(date);
+    setMessages(messages);
   };
-
+  
+  const handleLogout = async ()=>{
+    localStorage.clear();
+  }
   const handleSend = async () => {
     if (!input.trim() || loading) return;
     setLoading(true);
+    setThinking(true);
     const startTime = Date.now();
+    const chatId = selectedChat || new Date().toISOString();
 
     try {
       const apiUrl = API_URLS[selectedApi];
       const apiKey = API_KEYS[selectedApi];
       const model = models[selectedApi];
+
+      // Add user message immediately with thinking indicator
+      await addDoc(collection(db, `chats/${user.uid}/messages`), {
+        text: input,
+        sender: 'user',
+        timestamp: new Date().toISOString(),
+        model: selectedApi,
+        chatId
+      });
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -114,24 +136,20 @@ const Chat = () => {
       const botMessage = data.choices[0].message.content;
       
       await addDoc(collection(db, `chats/${user.uid}/messages`), {
-        text: input,
-        sender: 'user',
-        timestamp: new Date().toISOString(),
-        model: selectedApi
-      });
-      
-      await addDoc(collection(db, `chats/${user.uid}/messages`), {
         text: botMessage,
         sender: 'bot',
         timestamp: new Date().toISOString(),
-        model: selectedApi
+        model: selectedApi,
+        chatId
       });
       
       setInput('');
+      setSelectedChat(chatId);
     } catch (error) {
       console.error("Error sending message:", error);
     } finally {
       setLoading(false);
+      setThinking(false);
     }
   };
 
@@ -139,16 +157,22 @@ const Chat = () => {
     <div className="chat-container">
       <aside className={`sidebar ${showSidebar ? 'active' : ''}`}>
         <div className="chat-history-container">
-          <h3 className="history-title">Chat History</h3>
-          {chatHistory.map(([date, msgs]) => (
-            <div key={date} className="history-date-group">
-              <h4 className="history-date">{date}</h4>
-              <div className="history-messages">
-                {msgs.slice(0, 2).map((msg, idx) => (
-                  <div key={idx} className="history-message-preview">
-                    {msg.text.substring(0, 50)}...
-                  </div>
-                ))}
+          <h3 className="history-title">
+            <MessageSquare className="history-icon" />
+            Chat History
+          </h3>
+          {chatHistory.map(([date, { messages, preview }]) => (
+            <div 
+              key={date} 
+              className={`history-date-group ${selectedChat === date ? 'selected' : ''}`}
+              onClick={() => handleChatSelect(date, messages)}
+            >
+              <div className="history-date-header">
+                <h4 className="history-date">{date}</h4>
+                <ChevronDown className="history-arrow" />
+              </div>
+              <div className="history-preview">
+                {preview.substring(0, 50)}...
               </div>
             </div>
           ))}
@@ -163,14 +187,15 @@ const Chat = () => {
           <div className="header-center">
             <h2>PETRONAS AI Assistant</h2>
             <div className="model-selector">
+              <Bot className="model-icon" />
               <select 
                 value={selectedApi} 
                 onChange={(e) => setSelectedApi(e.target.value)}
                 className="model-select"
               >
-                {Object.entries(models).map(([key, value]) => (
+                {Object.entries(models).map(([key, name]) => (
                   <option key={key} value={key}>
-                    {value.split('/')[1]}
+                    {name}
                   </option>
                 ))}
               </select>
@@ -189,7 +214,7 @@ const Chat = () => {
             >
               <div className="message-header">
                 <span className="sender-name">
-                  {message.sender === 'user' ? 'You' : message.model}
+                  {message.sender === 'user' ? 'You' : models[message.model]}
                 </span>
                 <span className="message-time">
                   {new Date(message.timestamp).toLocaleTimeString()}
@@ -197,13 +222,41 @@ const Chat = () => {
               </div>
               <div className="message-content">
                 {message.sender === 'bot' ? (
-                  <ReactMarkdown>{message.text}</ReactMarkdown>
+                  <ReactMarkdown 
+                    components={{
+                      h1: ({node, ...props}) => <h1 className="markdown-h1" {...props} />,
+                      h2: ({node, ...props}) => <h2 className="markdown-h2" {...props} />,
+                      h3: ({node, ...props}) => <h3 className="markdown-h3" {...props} />,
+                      ul: ({node, ...props}) => <ul className="markdown-ul" {...props} />,
+                      ol: ({node, ...props}) => <ol className="markdown-ol" {...props} />,
+                      li: ({node, ...props}) => <li className="markdown-li" {...props} />,
+                      code: ({node, ...props}) => <code className="markdown-code" {...props} />
+                    }}
+                  >
+                    {message.text}
+                  </ReactMarkdown>
                 ) : (
                   message.text
                 )}
               </div>
+              {message.sender === 'bot' && (
+                <div className="message-footer">
+                  <span className="model-tag">
+                    <Bot className="model-icon-small" />
+                    {models[message.model]}
+                  </span>
+                </div>
+              )}
             </div>
           ))}
+          {thinking && (
+            <div className="thinking-indicator">
+              <Brain className="thinking-icon animate-pulse" />
+              <div className="thinking-dots">
+                <span>.</span><span>.</span><span>.</span>
+              </div>
+            </div>
+          )}
           {loading && (
             <div className="loading-indicator">
               <Loader2 className="animate-spin" />

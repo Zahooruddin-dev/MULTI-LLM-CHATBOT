@@ -135,6 +135,22 @@ body {
 .submit-button:active {
   background-color: var(--teal-dark);
   transform: translateY(1px);
+}select {
+  background: transparent;
+  height: 2rem;
+  font-size: 1rem;
+  margin: 0.35rem;
+  border: 1px solid rgb(106, 106, 106);
+  border-radius: 1.5rem;
+  color: rgb(205, 230, 232); /* Ensures the text is visible */
+  padding: 0 1rem;
+}
+
+/* Dropdown menu styles */
+select option {
+  background: rgb(49, 122, 122); /* Ensures the dropdown background is white */
+  box-shadow: #246768;
+  color: black; /* Ensures the text is readable */
 }
 
 /* Chat Styles */
