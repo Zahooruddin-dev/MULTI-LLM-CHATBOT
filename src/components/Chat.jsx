@@ -89,7 +89,16 @@ const Chat = () => {
   };
   
   const handleLogout = async ()=>{
-    localStorage.clear();
+    logout(async function logout() {
+        try {
+          await signOut(auth);
+          setUser(null);
+          setError('');
+        } catch (err) {
+          setError('Failed to logout.');
+          throw err;
+        }
+      })
   }
   const handleSend = async () => {
     if (!input.trim() || loading) return;
